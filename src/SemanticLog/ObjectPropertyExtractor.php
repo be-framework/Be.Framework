@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Be\Framework\SemanticLog;
 
 use ReflectionClass;
+use SensitiveParameter;
 
 use function array_walk;
 use function get_object_vars;
@@ -22,9 +23,25 @@ use function is_string;
  * - Uninitialized properties (returns null)
  * - Been instances (excluded from output)
  * - Non-storable values like resources (excluded)
+ * - Properties named after a constructor parameter marked #[\SensitiveParameter]
+ *   (value replaced with {@see self::FILTERED})
+ *
+ * The last rule reuses the attribute an application already applies for PHP stack-trace
+ * redaction: a credential-shaped public property (a login's password, a reset token) would
+ * otherwise reach the semantic log verbatim, since #[\SensitiveParameter] itself only
+ * affects traces. Matching by name, not by promotion, also covers a Final that assigns a
+ * marked constructor argument to a same-named declared property.
  */
 final class ObjectPropertyExtractor
 {
+    /**
+     * The value recorded in place of a sensitive property.
+     *
+     * Same literal bear/event-sourcing's SensitiveParamsFilter records for a redacted request
+     * param, so both layers of one observation tree read the same way.
+     */
+    public const string FILTERED = '[FILTERED]';
+
     /**
      * Extract all public properties from an object for logging
      *
@@ -37,33 +54,41 @@ final class ObjectPropertyExtractor
      */
     public function extract(object $result): array
     {
-        $properties = $this->collectVisibleProperties($result);
-        $this->mergeDeclaredProperties($properties, $result);
+        $sensitive = self::sensitivePropertyNames($result);
+        $properties = $this->collectVisibleProperties($result, $sensitive);
+        $this->mergeDeclaredProperties($properties, $result, $sensitive);
 
         return $properties;
     }
 
-    /** @return array<string, mixed> */
-    private function collectVisibleProperties(object $result): array
+    /**
+     * @param array<string, true> $sensitive
+     *
+     * @return array<string, mixed>
+     */
+    private function collectVisibleProperties(object $result, array $sensitive): array
     {
         $properties = [];
         $dynamicProperties = get_object_vars($result);
         array_walk(
             $dynamicProperties,
-            static function (mixed $value, string $name) use (&$properties): void {
+            static function (mixed $value, string $name) use (&$properties, $sensitive): void {
                 if ($value instanceof Been || ! self::isStorableValue($value)) {
                     return;
                 }
 
-                self::storeProperty($properties, $name, $value);
+                self::storeProperty($properties, $name, $value, $sensitive);
             },
         );
 
         return $properties;
     }
 
-    /** @param array<string, mixed> $properties */
-    private function mergeDeclaredProperties(array &$properties, object $result): void
+    /**
+     * @param array<string, mixed> $properties
+     * @param array<string, true>  $sensitive
+     */
+    private function mergeDeclaredProperties(array &$properties, object $result, array $sensitive): void
     {
         foreach ((new ReflectionClass($result))->getProperties() as $property) {
             if (! $property->isPublic() || $property->isStatic()) {
@@ -89,8 +114,30 @@ final class ObjectPropertyExtractor
                 continue;
             }
 
-            self::storeProperty($properties, $name, $value);
+            self::storeProperty($properties, $name, $value, $sensitive);
         }
+    }
+
+    /**
+     * Names of constructor parameters marked #[\SensitiveParameter], keyed for lookup.
+     *
+     * @return array<string, true>
+     */
+    private static function sensitivePropertyNames(object $result): array
+    {
+        $constructor = (new ReflectionClass($result))->getConstructor();
+        if ($constructor === null) {
+            return [];
+        }
+
+        $names = [];
+        foreach ($constructor->getParameters() as $parameter) {
+            if ($parameter->getAttributes(SensitiveParameter::class) !== []) {
+                $names[$parameter->getName()] = true;
+            }
+        }
+
+        return $names;
     }
 
     /** @psalm-assert-if-true array<array-key, mixed>|bool|float|int|object|string|null $value */
@@ -108,9 +155,14 @@ final class ObjectPropertyExtractor
     /**
      * @param array<string, mixed>                                      $properties
      * @param array<array-key, mixed>|bool|float|int|object|string|null $value
+     * @param array<string, true>                                       $sensitive
      */
-    private static function storeProperty(array &$properties, string $name, array|bool|float|int|object|string|null $value): void
-    {
-        $properties[$name] = $value;
+    private static function storeProperty(
+        array &$properties,
+        string $name,
+        array|bool|float|int|object|string|null $value,
+        array $sensitive,
+    ): void {
+        $properties[$name] = isset($sensitive[$name]) ? self::FILTERED : $value;
     }
 }

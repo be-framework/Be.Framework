@@ -19,6 +19,7 @@ use PHPUnit\Framework\TestCase;
 use Ray\Di\Injector;
 use ReflectionClass;
 use RuntimeException;
+use SensitiveParameter;
 use stdClass;
 
 use function assert;
@@ -30,6 +31,34 @@ final class TestInput
     public function __construct(
         public readonly string $data,
     ) {
+    }
+}
+
+#[Be(FakeProcessedData::class)]
+final class SensitiveInput
+{
+    public function __construct(
+        public readonly string $loginId,
+        #[SensitiveParameter]
+        public readonly string $password,
+    ) {
+    }
+}
+
+/**
+ * A Final that keeps a marked constructor argument on a same-named declared property.
+ * Deliberately not promoted: that is the shape under test, so the promotion sniff is off here.
+ */
+#[Be(FakeProcessedData::class)]
+final class SensitiveAssignedInput
+{
+    public readonly string $authKey; // phpcs:ignore SlevomatCodingStandard.Classes.RequireConstructorPropertyPromotion.RequiredConstructorPropertyPromotion
+
+    public function __construct(
+        #[SensitiveParameter]
+        string $authKey,
+    ) {
+        $this->authKey = $authKey;
     }
 }
 
@@ -167,6 +196,37 @@ final class LoggerTest extends TestCase
         $this->assertSame('becoming_open', $openData['type']);
         $this->assertSame(TestInput::class, $openData['context']['input']);
         $this->assertSame(['data' => 'data'], $openData['context']['prop']);
+    }
+
+    public function testOpenChainMasksSensitiveParameterProps(): void
+    {
+        $chainId = $this->logger->openChain(new SensitiveInput('admin', 'plaintext-password'));
+        $this->logger->closeChain(new FakeProcessedData('done'), $chainId);
+
+        $logData = $this->semanticLogger->toArray();
+        assert(is_array($logData['open']) && is_array($logData['open'][0]));
+        $openData = $logData['open'][0];
+        assert(is_array($openData) && is_array($openData['context']));
+
+        // (array): semantic-logger 0.9 freezes the context and delivers a map as an object.
+        $this->assertSame(
+            ['loginId' => 'admin', 'password' => ObjectPropertyExtractor::FILTERED],
+            (array) $openData['context']['prop'],
+        );
+    }
+
+    public function testOpenChainMasksSensitiveParameterAssignedToDeclaredProp(): void
+    {
+        // The parameter is not promoted; the class assigns it to a same-named public property.
+        $chainId = $this->logger->openChain(new SensitiveAssignedInput('totp-shared-secret'));
+        $this->logger->closeChain(new FakeProcessedData('done'), $chainId);
+
+        $logData = $this->semanticLogger->toArray();
+        assert(is_array($logData['open']) && is_array($logData['open'][0]));
+        $openData = $logData['open'][0];
+        assert(is_array($openData) && is_array($openData['context']));
+
+        $this->assertSame(['authKey' => ObjectPropertyExtractor::FILTERED], (array) $openData['context']['prop']);
     }
 
     public function testCloseChainLogsSuccessExit(): void
