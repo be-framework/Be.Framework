@@ -24,6 +24,7 @@ use stdClass;
 
 use function assert;
 use function is_array;
+use function is_string;
 
 #[Be(FakeProcessedData::class)]
 final class TestInput
@@ -46,11 +47,10 @@ final class SensitiveInput
 }
 
 /**
- * A Final that keeps a marked constructor argument on a same-named declared property.
+ * A Final (no #[Be]) that keeps a marked constructor argument on a same-named declared property.
  * Deliberately not promoted: that is the shape under test, so the promotion sniff is off here.
  */
-#[Be(FakeProcessedData::class)]
-final class SensitiveAssignedInput
+final class SensitiveAssignedFinal
 {
     public readonly string $authKey; // phpcs:ignore SlevomatCodingStandard.Classes.RequireConstructorPropertyPromotion.RequiredConstructorPropertyPromotion
 
@@ -218,7 +218,7 @@ final class LoggerTest extends TestCase
     public function testOpenChainMasksSensitiveParameterAssignedToDeclaredProp(): void
     {
         // The parameter is not promoted; the class assigns it to a same-named public property.
-        $chainId = $this->logger->openChain(new SensitiveAssignedInput('totp-shared-secret'));
+        $chainId = $this->logger->openChain(new SensitiveAssignedFinal('totp-shared-secret'));
         $this->logger->closeChain(new FakeProcessedData('done'), $chainId);
 
         $logData = $this->semanticLogger->toArray();
@@ -227,6 +227,41 @@ final class LoggerTest extends TestCase
         assert(is_array($openData) && is_array($openData['context']));
 
         $this->assertSame(['authKey' => ObjectPropertyExtractor::FILTERED], (array) $openData['context']['prop']);
+    }
+
+    public function testCloseMasksSensitiveParameterOnIntermediateBeing(): void
+    {
+        $openId = $this->logger->open(new TestInput('test data'), SensitiveInput::class, []);
+        // SensitiveInput carries #[Be], so this close is being_close, not being_final_close.
+        $this->logger->close(new SensitiveInput('admin', 'plaintext-password'), $openId);
+
+        $closeData = $this->firstCloseData();
+        $this->assertSame('being_close', $closeData['type']);
+        $this->assertSame(
+            ['loginId' => 'admin', 'password' => ObjectPropertyExtractor::FILTERED],
+            (array) $closeData['context']['prop'],
+        );
+    }
+
+    public function testCloseMasksSensitiveParameterOnFinal(): void
+    {
+        $openId = $this->logger->open(new TestInput('test data'), SensitiveAssignedFinal::class, []);
+        $this->logger->close(new SensitiveAssignedFinal('totp-shared-secret'), $openId);
+
+        $closeData = $this->firstCloseData();
+        $this->assertSame('being_final_close', $closeData['type']);
+        $this->assertSame(['authKey' => ObjectPropertyExtractor::FILTERED], (array) $closeData['context']['prop']);
+    }
+
+    /** @return array{type: string, context: array<string, mixed>} */
+    private function firstCloseData(): array
+    {
+        $logData = $this->semanticLogger->toArray();
+        assert(is_array($logData['open']) && is_array($logData['open'][0]));
+        $closeData = $logData['open'][0]['close'];
+        assert(is_array($closeData) && is_string($closeData['type']) && is_array($closeData['context']));
+
+        return ['type' => $closeData['type'], 'context' => $closeData['context']];
     }
 
     public function testCloseChainLogsSuccessExit(): void
