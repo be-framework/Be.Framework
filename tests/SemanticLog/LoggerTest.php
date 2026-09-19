@@ -166,7 +166,9 @@ final class LoggerTest extends TestCase
 
         $this->assertSame('becoming_open', $openData['type']);
         $this->assertSame(TestInput::class, $openData['context']['input']);
-        $this->assertSame(['data' => 'data'], $openData['context']['prop']);
+        // 0.9 freezes the context, so a map arrives as an object; 0.8 kept it an array.
+        // The cast reads the same under both, which is what the constraint allows.
+        $this->assertSame(['data' => 'data'], (array) $openData['context']['prop']);
     }
 
     public function testCloseChainLogsSuccessExit(): void

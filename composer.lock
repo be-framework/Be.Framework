@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "fbc5e2ba2a05d8a9a1e8db861df3f179",
+    "content-hash": "74f63a1d38919b85a18b8f276762fde4",
     "packages": [
         {
             "name": "justinrainbow/json-schema",
@@ -137,16 +137,16 @@
         },
         {
             "name": "koriym/semantic-logger",
-            "version": "0.8.0",
+            "version": "0.9.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/koriym/Koriym.SemanticLogger.git",
-                "reference": "11ceb9e6d7a9e4723736f66bce9be78eb8a5b94d"
+                "reference": "5e427285bad04169e6d33162b2afd2611b3a52c1"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/koriym/Koriym.SemanticLogger/zipball/11ceb9e6d7a9e4723736f66bce9be78eb8a5b94d",
-                "reference": "11ceb9e6d7a9e4723736f66bce9be78eb8a5b94d",
+                "url": "https://api.github.com/repos/koriym/Koriym.SemanticLogger/zipball/5e427285bad04169e6d33162b2afd2611b3a52c1",
+                "reference": "5e427285bad04169e6d33162b2afd2611b3a52c1",
                 "shasum": ""
             },
             "require": {
@@ -159,7 +159,7 @@
             },
             "bin": [
                 "bin/validate-semantic-log.php",
-                "bin/stree"
+                "src-stree/bin/stree"
             ],
             "type": "library",
             "extra": {
@@ -170,7 +170,8 @@
             },
             "autoload": {
                 "psr-4": {
-                    "Koriym\\SemanticLogger\\": "src/"
+                    "Koriym\\SemanticLogger\\": "src/",
+                    "Koriym\\SemanticLogger\\Stree\\": "src-stree/src/"
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
@@ -186,9 +187,9 @@
             "description": "Type-safe structured logging with schema validation and meaningful context",
             "support": {
                 "issues": "https://github.com/koriym/Koriym.SemanticLogger/issues",
-                "source": "https://github.com/koriym/Koriym.SemanticLogger/tree/0.8.0"
+                "source": "https://github.com/koriym/Koriym.SemanticLogger/tree/0.9.0"
             },
-            "time": "2026-04-24T08:34:32+00:00"
+            "time": "2026-08-12T12:58:19+00:00"
         },
         {
             "name": "marc-mabe/php-enum",
