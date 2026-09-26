@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Be\Framework\SemanticVariable;
 
 use MyVendor\MyApp\SemanticVariables\Counted;
+use MyVendor\MyApp\SemanticVariables\Tags;
 use MyVendor\MyApp\SemanticVariables\Tally;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
@@ -22,6 +23,7 @@ final class SemanticValidatorCacheTest extends TestCase
         $this->validator = new SemanticValidator('MyVendor\\MyApp\\SemanticVariables');
         Counted::$count = 0;
         Tally::$count = 0;
+        Tags::$count = 0;
     }
 
     public function testUnchangedValueIsValidatedOncePerChain(): void
@@ -90,5 +92,29 @@ final class SemanticValidatorCacheTest extends TestCase
 
         $this->validator->endChain();
         $this->assertNull($cache->getValue($this->validator), 'endChain() must discard the cache');
+    }
+
+    public function testArrayValuesAreNeverCached(): void
+    {
+        // Array values are excluded from the cache (normalizing costs more than
+        // re-validating), so each call must re-run even in an active chain.
+        $this->validator->beginChain();
+        $this->validator->validateWithAttributes('tags', [], ['a', 'b']);
+        $this->validator->validateWithAttributes('tags', [], ['a', 'b']);
+        $this->validator->endChain();
+
+        $this->assertSame(2, Tags::$count, 'Array values must never be cached');
+    }
+
+    public function testMultiArgCallsAreNeverCached(): void
+    {
+        // The cache only serves single-value validations; multi-arg (cross-field)
+        // calls must always re-validate so a changed sibling arg is never masked.
+        $this->validator->beginChain();
+        $this->validator->validateWithAttributes('counted', [], 5, 99);
+        $this->validator->validateWithAttributes('counted', [], 5, 99);
+        $this->validator->endChain();
+
+        $this->assertSame(2, Counted::$count, 'Multi-arg calls must never be cached');
     }
 }
