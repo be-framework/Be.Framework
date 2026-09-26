@@ -18,7 +18,9 @@ use Be\Framework\SemanticLog\Logger;
 use Be\Framework\SemanticVariable\Errors;
 use Be\Framework\SemanticVariable\SemanticValidator;
 use InvalidArgumentException;
+use Koriym\SemanticLogger\Exception\NoLogSessionException;
 use Koriym\SemanticLogger\SemanticLogger;
+use MyVendor\MyApp\SemanticVariables\Counted;
 use PHPUnit\Framework\TestCase;
 use Ray\Di\AbstractModule;
 use Ray\Di\Di\Inject;
@@ -291,6 +293,27 @@ final class BecomingTest extends TestCase
         $this->assertSame(BecomingCloseContext::ORIGIN_RUNTIME, $context['origin']);
     }
 
+    public function testFlushReturnsAccumulatedSessionAndResetsState(): void
+    {
+        // BeModule binds SemanticLoggerInterface as a singleton so one instance
+        // can accumulate several chains before the caller reads it out (see
+        // docs/semantic-log-architecture.md#log-lifecycle-flush-ownership).
+        // flush() must return everything accumulated so far AND reset the
+        // logger's internal state so a later read finds no session.
+        $semanticLogger = new SemanticLogger();
+        $becoming = $this->becomingWithLogger($semanticLogger);
+
+        $becoming(new BecomingTestInput('first'));
+        $becoming(new BecomingTestInput('second'));
+
+        $session = $semanticLogger->flush()->toArray();
+        assert(is_array($session['open']));
+        $this->assertCount(2, $session['open'], 'flush() must return both accumulated chains');
+
+        $this->expectException(NoLogSessionException::class);
+        $semanticLogger->toArray();
+    }
+
     private function becomingWithLogger(SemanticLogger $semanticLogger): Becoming
     {
         $injector = new Injector(new BecomingTestModule());
@@ -348,6 +371,50 @@ final class BecomingTest extends TestCase
 
         $input = new BecomingTestInfrastructureErrorInput('test');
         ($this->becoming)($input);
+    }
+
+    public function testUnchangedValueValidatedOncePerChainThenReValidatedNextChain(): void
+    {
+        // Issue #81: a value carried unchanged through a chain's hops is
+        // validated once, but each new Becoming::__invoke() starts fresh.
+        Counted::$count = 0;
+
+        $result = ($this->becoming)(new BecomingTestCacheStart(5));
+        $this->assertSame(5, $result->counted);
+        $this->assertSame(1, Counted::$count, 'Unchanged value validated once within one chain');
+
+        ($this->becoming)(new BecomingTestCacheStart(5));
+        $this->assertSame(2, Counted::$count, 'A new chain re-validates (cache is per-chain)');
+    }
+}
+
+// Cache-per-chain fixtures (issue #81): `counted` carried unchanged through hops.
+#[Be(BecomingTestCacheMid::class)]
+final class BecomingTestCacheStart
+{
+    public function __construct(
+        #[Input]
+        public readonly int $counted,
+    ) {
+    }
+}
+
+#[Be(BecomingTestCacheEnd::class)]
+final class BecomingTestCacheMid
+{
+    public function __construct(
+        #[Input]
+        public readonly int $counted,
+    ) {
+    }
+}
+
+final class BecomingTestCacheEnd
+{
+    public function __construct(
+        #[Input]
+        public readonly int $counted,
+    ) {
     }
 }
 

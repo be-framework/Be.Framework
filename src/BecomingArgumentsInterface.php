@@ -25,4 +25,14 @@ interface BecomingArgumentsInterface
      * @phpstan-return array<string, mixed>
      */
     public function be(object $current, string $becoming): array;
+
+    /**
+     * Begin a metamorphosis chain (activates the semantic validator's per-chain cache).
+     */
+    public function beginChain(): void;
+
+    /**
+     * End a metamorphosis chain (discards the per-chain cache; must run even on failure).
+     */
+    public function endChain(): void;
 }

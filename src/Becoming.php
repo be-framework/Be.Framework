@@ -26,6 +26,7 @@ final class Becoming implements BecomingInterface
 {
     private Being $being;
     private LoggerInterface $logger;
+    private BecomingArgumentsInterface $becomingArguments;
 
     public function __construct(
         InjectorInterface $injector,
@@ -37,6 +38,7 @@ final class Becoming implements BecomingInterface
         $becomingArguments ??= new BecomingArguments($injector, new SemanticValidator($semanticNamespace));
         $logger ??= new Logger(new SemanticLogger(), $becomingArguments);
         $this->logger = $logger;
+        $this->becomingArguments = $becomingArguments;
         $this->being = new Being($logger, $becomingArguments, new BecomingType());
     }
 
@@ -56,6 +58,10 @@ final class Becoming implements BecomingInterface
         $chainId = $this->logger->openChain($input);
         $current = $input;
         $isFirst = true;
+
+        // Activate the semantic validator's per-chain cache; the finally below
+        // guarantees it is discarded whether the chain succeeds or throws.
+        $this->becomingArguments->beginChain();
 
         try {
             // Being reveals its becoming, then becomes it
@@ -90,6 +96,8 @@ final class Becoming implements BecomingInterface
             }
 
             throw $e;
+        } finally {
+            $this->becomingArguments->endChain();
         }
 
         // Success close is outside the try so a logging failure here is not
