@@ -73,4 +73,22 @@ final class NullValidator implements SemanticValidatorInterface
     {
         return new NullErrors();
     }
+
+    /**
+     * No-op: the null validator has no cache to activate.
+     */
+    #[Override]
+    public function beginChain(): void
+    {
+        // No-op
+    }
+
+    /**
+     * No-op: the null validator has no cache to discard.
+     */
+    #[Override]
+    public function endChain(): void
+    {
+        // No-op
+    }
 }

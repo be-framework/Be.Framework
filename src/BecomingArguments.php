@@ -82,6 +82,18 @@ final class BecomingArguments implements BecomingArgumentsInterface
         return $args;
     }
 
+    #[Override]
+    public function beginChain(): void
+    {
+        $this->semanticValidator->beginChain();
+    }
+
+    #[Override]
+    public function endChain(): void
+    {
+        $this->semanticValidator->endChain();
+    }
+
     /**
      * Resolves #[Inject] parameters from DI container
      *

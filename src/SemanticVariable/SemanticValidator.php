@@ -14,14 +14,24 @@ use ReflectionClass;
 use ReflectionMethod;
 use ReflectionParameter;
 
+use function array_filter;
 use function array_key_exists;
+use function array_values;
 use function class_exists;
+use function count;
 use function get_object_vars;
+use function gettype;
+use function implode;
 use function in_array;
 use function is_array;
+use function is_object;
+use function reset;
+use function sort;
+use function spl_object_id;
 use function str_replace;
 use function trigger_error;
 use function ucwords;
+use function var_export;
 
 use const E_USER_NOTICE;
 
@@ -42,6 +52,19 @@ final class SemanticValidator implements SemanticValidatorInterface
     /** @var array<string, class-string> */
     private readonly array $classMap;
     private readonly SemanticValidationMethodResolver $validationMethodResolver;
+
+    /** @var array<string, true> Full class names already confirmed missing — avoids re-checking class_exists() and re-emitting the notice on every call. */
+    private array $missingSemanticClasses = [];
+
+    /**
+     * Per-chain value-validation cache. null = inactive (outside a chain): every
+     * call re-validates and nothing accumulates. An array (set by beginChain())
+     * remembers successfully validated (name, attributes, value) triples for the
+     * lifetime of one Becoming::__invoke() chain.
+     *
+     * @var array<string, true>|null
+     */
+    private array|null $chainCache = null;
 
     /** @param array<string, class-string>|SemanticValidationMethodResolver|null $classMapOrValidationMethodResolver */
     public function __construct(
@@ -255,6 +278,12 @@ final class SemanticValidator implements SemanticValidatorInterface
             return new NullErrors();
         }
 
+        $cacheKey = $this->chainCacheKey($variableName, $parameterAttributes, $args, $validationMethods);
+        if ($cacheKey !== null && isset($this->chainCache[$cacheKey])) {
+            // Same value carried unchanged through this chain — already validated.
+            return new NullErrors();
+        }
+
         $exceptions = [];
 
         foreach ($validationMethods as $method) {
@@ -266,7 +295,83 @@ final class SemanticValidator implements SemanticValidatorInterface
             }
         }
 
+        if ($cacheKey !== null && empty($exceptions)) {
+            $this->chainCache[$cacheKey] = true;
+        }
+
         return empty($exceptions) ? new NullErrors() : new Errors($exceptions);
+    }
+
+    /**
+     * Activate a fresh per-chain cache. See {@see SemanticValidatorInterface::beginChain()}.
+     */
+    #[Override]
+    public function beginChain(): void
+    {
+        $this->chainCache = [];
+    }
+
+    /**
+     * Discard the per-chain cache. See {@see SemanticValidatorInterface::endChain()}.
+     */
+    #[Override]
+    public function endChain(): void
+    {
+        $this->chainCache = null;
+    }
+
+    /**
+     * Cache key for a single-value validation, or null when caching must be bypassed.
+     *
+     * Bypassed when: no active chain; not a single-value call; the value is an
+     * array (normalizing it costs more than re-validating); or any resolved
+     * #[Validate] method takes an #[Inject] parameter (it may consult mutable
+     * injected state and legitimately return a different answer for the same
+     * value, so its result must never be cached).
+     *
+     * The key combines the variable name, the SORTED attribute set (so a later
+     * #[Teen] int $age never reuses an earlier plain int $age result — they
+     * select different #[Validate] methods), and a value key. Scalars/null are
+     * type-tagged to avoid 1/"1"/true collisions; objects use spl_object_id(),
+     * which is a safe stand-in for value identity ONLY because Be Framework's
+     * public-readonly convention means an object's identity implies its state
+     * is unchanged since construction.
+     *
+     * @param ParameterAttributes $parameterAttributes
+     * @param ValidationArguments $args
+     * @param ReflectionMethods   $validationMethods
+     * @phpstan-param array<array-key, mixed>      $parameterAttributes
+     * @phpstan-param array<array-key, mixed>      $args
+     * @phpstan-param array<int, ReflectionMethod> $validationMethods
+     */
+    private function chainCacheKey(string $variableName, array $parameterAttributes, array $args, array $validationMethods): string|null
+    {
+        if ($this->chainCache === null || count($args) !== 1) {
+            return null;
+        }
+
+        /** @var mixed $value */
+        $value = reset($args);
+        if (is_array($value)) {
+            return null;
+        }
+
+        foreach ($validationMethods as $method) {
+            foreach ($method->getParameters() as $parameter) {
+                if ($this->validationMethodResolver->hasInjectAttribute($parameter)) {
+                    return null;
+                }
+            }
+        }
+
+        $valueKey = is_object($value)
+            ? 'obj:' . spl_object_id($value)
+            : gettype($value) . ':' . var_export($value, true);
+
+        $attributes = array_values(array_filter($parameterAttributes, 'is_string'));
+        sort($attributes);
+
+        return $variableName . '|' . implode(',', $attributes) . '|' . $valueKey;
     }
 
     /**
@@ -277,7 +382,12 @@ final class SemanticValidator implements SemanticValidatorInterface
         $className = $this->convertToClassName($variableName);
         $fullClassName = $this->classMap[$className] ?? "{$this->semanticNamespace}\\$className";
 
+        if (isset($this->missingSemanticClasses[$fullClassName])) {
+            return null;
+        }
+
         if (! class_exists($fullClassName)) {
+            $this->missingSemanticClasses[$fullClassName] = true;
             trigger_error("Semantic variable '{$className}' not registered in ontology namespace {$this->semanticNamespace}", E_USER_NOTICE);
 
             return null;
